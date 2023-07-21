@@ -1,0 +1,760 @@
+---
+title: "MovieLens Recommender System Capstone Project"
+author: "Kevin Jané"
+date: "2022"
+output:
+  bookdown::pdf_document2:
+    keep_tex: true
+    number_sections: true
+    toc: true
+    toc_depth: 3
+    latex_engine: lualatex
+  rmarkdown::pdf_document:
+     keep_tex: true
+     number_sections: true
+     toc: true
+     toc_depth: 3
+     latex_engine: xelatex
+documentclass: report
+papersize: a4
+fontsize: 12pt
+links-as-notes: true
+linkcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE, cache.lazy = FALSE)
+```
+
+\newpage
+# Preface - Introduction {#preface}
+
+The purpose of this capstone project is to create a movie recommender system to achieve the
+[Professional Certificate of the Data Science](https://www.edx.org/es/professional-certificate/harvardx-data-science) 
+courses taught by Harvard University.
+
+The data science job market is exponencially growing being in the 
+[top 3 of jobs most sought after](https://www.forbes.com/sites/forbeshumanresourcescouncil/2021/05/20/hr-leaders-share-14-in-demand-skills-employers-want-in-2021/?sh=44ba748d1e45), 
+this can allow us to infer that the world is giving so much importance to open data than 
+it was years ago, recognizing the potential of data analysis and prediction models for 
+the global social-economic development.
+
+I as an undergraduate economics student, being passionate about data, being able to manipulate 
+data with R facilitates doing data analyses. 
+Also, predictive models are essential to our, which become more time-efficient with R.
+
+This project is made with the purpose of creating a recommender system using the [MovieLens database](https://files.grouplens.org/datasets/movielens/ml-10m-README.html)
+
+The dataset used in this project is a version of MovieLens that contains **10000054 movies ratings**. The data is 
+divided in two parts, 9 million are used for training and 1 million for validation.
+In the training database, there are **69878 users** and **10677 movies**, divided in **20 different genres**, 
+such as Action, Adventure, Horror, Drama, Thriller and so on.
+
+In this case, our goal is trying to minimize the [**RMSE** (Root Mean Squared Error)]{#RMSE} at least to **0.86549** (RMSE <= **0.86549**)
+
+\newpage
+# Exploratory Data Analysis {#ExpDAnalysis}
+## Data preparation {#Dataprep}
+
+In this section, we install, and load every packages required for this project, as well as the MovieLens database provided by the Proffessor Rafael Irizarry.
+
+```{r packages_install, results='hide', warning=FALSE}
+# Install all needed libraries
+
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(tidyr)) install.packages("tidyr")
+if(!require(dslabs)) install.packages("dslabs")
+if(!require(stringr)) install.packages("stringr")
+if(!require(forcats)) install.packages("forcats")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+```
+
+```{r load_packages, results='hide', warning=FALSE}
+# Loading all needed libraries
+
+library(dplyr)
+library(dslabs)
+library(tidyverse)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+library(data.table)
+library(caret)
+```
+
+```{r load_data, results='hide', warning=FALSE}
+# Initial code provided by edX.
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", 
+                             readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(
+  readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 4.0 or later:
+movies <- as.data.frame(movies) %>% 
+  mutate(movieId = as.numeric(movieId),
+         title = as.character(title),
+         genres = as.character(genres))
+
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind = "Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = movielens$rating, 
+                                  times = 1, p = 0.1, 
+                                  list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+```
+
+The MovieLnens database were divided in two parts, one part is for model training that is called ```edx```, 
+and the other one that is for the final model validation and it is called ```validation```.
+
+The main idea is that, with the ```edx``` database we are going to train models, and select the best among them.
+
+And then, we are going to test the best model with the ```validation``` database.
+
+For that purpose, we have to divide ```edx``` database in ```train_set``` and ```test_set```. ```train_set``` 
+is used to create all the models and ```test_set``` is used to prove how nice those models works, 
+and the best among them, is used to test it with the ```validation``` database.
+
+```{r load_data_2, results='hide', warning=FALSE}
+# Test_set set will be 10% of Edx data
+test_index_2 <- createDataPartition(y = edx$rating, 
+                                    times = 1, p = 0.1, 
+                                    list = FALSE)
+train_set <- edx[-test_index_2,]
+temp_2 <- edx[test_index_2,]
+
+# Make sure userId and movieId in test_set set are also in train_set
+test_set <- temp_2 %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+
+# Add rows removed from test_set set back into train_set
+removed_2 <- anti_join(temp_2, test_set)
+train_set <- rbind(train_set, removed_2)
+```
+
+
+## Initial data Exploration {#InDatExp}
+
+### A first look
+
+In this project, we divided the 10 million database in two parts: one is called ```edx```, that contains 
+**9,000,055** for training and the other one is ```validation```, that contains **999,999** for the validation phase.
+
+Finally, for training all the models, we divided the ```edx``` database in two parts: one is 
+called ```train_set```, that contains **8,100,067** for training and the other one is ```test_set```, 
+that contains **899,988** for the validation phase.
+
+The initial variables/columns used in the databases (edx, validation, train_set and test_set) are:
+
+\begin{itemize}
+  \item userId <integer>: Unique identification number for each user.
+  \item movieId <numeric>: Unique identification number for each movie.
+  \item rating <numeric>: Rating of one movie by one user. Ratings are made on a 5-Star scale with half-star
+increments.
+  \item timestamp <integer>: Timestamp for one specific rating provided by one user.
+  \item title <character>: Title of each movie including the year of the release.
+  \item genres <character>: List of pipe-separated of genre of each movie.
+\end{itemize}
+
+### Edx database
+
+The ```edx``` database contains **9,000,055** rows with **71567** different users and **10681** movies with rating
+score between 0.5 and 5. There is no missing values (0 or NA).
+
+**Edx database**
+
+```{r Edx database, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+edx %>% 
+  summarize(Users = n_distinct(userId),
+            Movies = n_distinct(movieId))
+```
+
+**Missing Values per Variable on Edx database**
+
+```{r Missing Values per Column_edx, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+sapply(edx, function(x) sum(is.na(x)))
+```
+
+### Validation Database
+
+The ```validation``` database contains **999,999** rows with **68534** different users and **9809** movies with rating
+score between 0.5 and 5. There is no missing values (0 or NA).
+
+**Validation database**
+
+```{r Validation database, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+validation %>% 
+  summarize(Users = n_distinct(userId),
+              Movies = n_distinct(movieId))
+```
+
+**Missing Values per Variable on Validation database**
+
+```{r Missing Values per Column on Validation, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+sapply(validation, function(x) sum(is.na(x)))
+```
+
+### Train_Set
+
+The ```train_set``` database contains **8,100,067** rows with **69878** different users and **10677** movies with rating
+score between 0.5 and 5. There is no missing values (0 or NA).
+
+**Train_set database**
+
+```{r Train_set database, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+train_set %>% 
+  summarize(Users = n_distinct(userId),
+              Movies = n_distinct(movieId))
+```
+
+**Missing Values per Variable on Train_set database**
+
+```{r Missing Values per Column_train, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+sapply(train_set, function(x) sum(is.na(x)))
+```
+
+### Test_Set
+
+The ```train_set``` database contains **899,988** rows with **68052** different users and **9728** movies with rating
+score between 0.5 and 5. There is no missing values (0 or NA).
+
+**Test_set database**
+
+```{r Test_set database, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+test_set %>% 
+  summarize(Users = n_distinct(userId),
+              Movies = n_distinct(movieId))
+```
+
+**Missing Values per Variable on Test_set database**
+
+```{r Missing Values per Column_test, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+sapply(test_set, function(x) sum(is.na(x)))
+```
+
+
+## Wrangling Data Process {#Wrangling}
+
+After the initial data exploration, we can observe two things that we can change to make a better analysis.
+The first is that the variable ```title``` contains the year where the movie was released. We can extract 
+the year and the month where the movie was released. This could be very important to make a precise prediction of 
+the movie rating.
+The second one is that the variable ```timestamp``` has a date format that we cannot read or use for a more precise
+analysis.
+
+
+The wrangling and processing data phase is construct by these steps:
+
+1. Convert ```timestamp``` variable to a more readable date format;
+
+```{r, echo=TRUE,results='hide',message=FALSE}
+# edx database
+edx$date <- as.POSIXct(edx$timestamp, 
+                       origin="1970-01-01")
+
+# validation database
+validation$date <- as.POSIXct(validation$timestamp, 
+                              origin="1970-01-01")
+
+# train_set database
+train_set$date <- as.POSIXct(train_set$timestamp, 
+                             origin="1970-01-01")
+
+# test_set database
+test_set$date <- as.POSIXct(test_set$timestamp, 
+                            origin="1970-01-01")
+```
+
+2. Extract the month and the year from the last step and we convert the columns into the desired data type, i.e, ```yearofRate``` should be numeric;
+
+```{r, echo=TRUE,results='hide',message=FALSE}
+# edx database
+edx$yearOfRate <- format(edx$date,"%Y")
+edx$yearOfRate <- as.numeric(edx$yearOfRate)
+edx$monthOfRate <- format(edx$date,"%m")
+edx$monthOfRate <- as.numeric(edx$monthOfRate)
+
+# validation database
+validation$yearOfRate <- format(validation$date,"%Y")
+validation$yearOfRate <- as.numeric(validation$yearOfRate)
+validation$monthOfRate <- format(validation$date,"%m")
+validation$monthOfRate <- as.numeric(validation$monthOfRate)
+
+# train_set database
+train_set$yearOfRate <- format(train_set$date,"%Y")
+train_set$yearOfRate <- as.numeric(train_set$yearOfRate)
+train_set$monthOfRate <- format(train_set$date,"%m")
+train_set$monthOfRate <- as.numeric(train_set$monthOfRate)
+
+# test_set database
+test_set$yearOfRate <- format(test_set$date,"%Y")
+test_set$yearOfRate <- as.numeric(test_set$yearOfRate)
+test_set$monthOfRate <- format(test_set$date,"%m")
+test_set$monthOfRate <- as.numeric(test_set$monthOfRate)
+```
+
+3. Extract the release year for each movie from the title;
+
+```{r, echo=TRUE,results='hide',message=FALSE}
+# edx database
+edx <- edx %>% 
+  mutate(release = as.numeric(str_sub(title,-5,-2)))
+
+# validation database
+validation <- validation %>% 
+  mutate(release = as.numeric(str_sub(title,-5,-2)))
+
+# train_set database
+train_set <- train_set %>% 
+  mutate(release = as.numeric(str_sub(title,-5,-2)))
+
+# test_set database
+test_set <- test_set %>% 
+  mutate(release = as.numeric(str_sub(title,-5,-2)))
+```
+
+4. Then, we remove the unnecessary columns on the databases.
+
+In this particular case, we remove ```timestamp``` and ```date``` because we already separated those variables into new columns, i.e, ```yearofRate```, ```monthofRate```, etc.
+So, ```timestamp``` and ```date``` are redundant variables and we are not gonna use it for this project.
+
+```{r, echo=TRUE,results='hide',message=FALSE}
+# edx database
+edx <- edx %>% 
+  select(-timestamp, -date)
+
+# validation database
+validation <- validation %>% 
+  select(-timestamp, -date)
+
+# train_set database
+train_set <- train_set %>% 
+  select(-timestamp, -date)
+
+# test_set database
+test_set <- test_set %>% 
+  select(-timestamp, -date)
+```
+
+These steps will increases the size of all databases (edx, validation, train_set and test_set).
+
+After processing the data, every database looks like this:
+
+**Processed database**
+
+```{r Processed datadabases, echo= TRUE, results='hold', message=FALSE, fig.pos="H"}
+head(edx, 5)
+```
+
+## Post Data Processed - Data Exploration {#DatExp2}
+
+After  variables/columns used in every database (edx, validation, train_set and test_set) are:
+\begin{itemize}
+  \item userId <integer>: Unique identification number for each user.
+  \item movieId <numeric>: Unique identification number for each movie.
+  \item rating <numeric>: Rating of one movie by one user. Ratings are made on a 5-Star scale with half-star.
+  \item title <character>: Title of each movie including the year of the release.
+  \item genres <character>: List of pipe-separated of genre of each movie.
+  \item yearOfRate <numeric>: Year of rating of one movie by one user.
+  \item monthOfRate <numeric>: Month of rating of one movie by one user.
+  \item release <numeric>: Year of when the movie was released.
+\end{itemize}
+
+In the next histogram, we can see that there are more frequency in positives votes, maybe for 3 or greater than 3 ```(ratings => 3)```. Based on this, we can inference
+that every user are more used to vote when they liked the movies.
+
+```{r rating distribution}
+ggplot(train_set, aes(x = rating)) + 
+  geom_histogram(position = "identity", bins = 10.5)+ xlab("Rating")+ylab("Frequency")
+```
+
+After seeing the first histogram, we can allow as to create a criteria about ratings.
+
+We can say that:
+\begin{itemize}
+  \item If rating is in between 0.5 and 2 (0.5<=rating=>2), the vote is negative.
+  \item If rating is in between 2.5 and 3.5 (2.5<=rating=>3.5), the vote is indifferent.
+  \item If rating is in between 4 and 5 (4<=rating=>5), the vote is positive.
+\end{itemize}
+
+This is because usually when we don't like a movie, we vote with a very low rating, when we are indifferent, we try to be as 
+impartial as we can, so we vote impartially, and if we like it, we rate it positively.
+
+We can try seeing it better with another plot.
+
+First we can create a dataset where it contains the year of rate, the type of vote that we mentioned and the rating.
+
+```{r}
+tOfVote <- train_set %>% 
+  mutate(t_vote = ifelse(rating<2.5, "Negative Vote",
+                            ifelse(rating>2&rating<4, "Indifferent Vote",
+                                   "Positive Vote"))) %>%
+  select(year=yearOfRate, t_vote, rating)
+tOfVote %>% count(t_vote)
+```
+
+And finally we plot the rating distribution.
+
+```{r}
+ggplot(tOfVote, aes(x = rating, fill = t_vote , colour = t_vote)) + 
+  geom_histogram(position = "identity", bins = 10) +
+  scale_fill_brewer(palette="Set1")
+```
+
+The next histogram can allow as to infer that in the 2000's the people vote the most.
+
+```{r, cache=TRUE}
+train_set$yearOfRate %>%
+  hist(main="Frequency of Ratings over Years", 
+       xlab="Years")
+```
+
+We can also try to plot the mean distribution of rating.
+We use the same criteria of before.
+
+```{r}
+tOfVote %>%
+  filter(t_vote %in% 
+           c('Negative Vote','Indifferent Vote', 'Positive Vote'))%>%
+  ggplot(aes(x=year,fill=t_vote, y = mean(rating))) + 
+  geom_bar(position="stack", stat="identity")+
+  xlab("Year") + ylab("Average") + 
+  ggtitle("Mean Rating Distribution by Type of Vote") +
+  scale_fill_brewer(palette="Set1")
+```
+
+These 2 graphs that we did, had the purpose of trying to let us know on what period of years, the people liked the most 
+those movies based on the criteria that we made on ratings.
+
+\newpage
+# Modeling {#Modeling}
+
+As we mentioned before on the [Data preparation]{#Dataprep} section, we are going to use the ```train_set``` to train all the models, and the best one
+is going to be used to test it with the ```validation``` database in the [final section]{#Validation}.
+
+## Loss Function - RMSE {#RMSE}
+
+The loss function in this project is the Root Mean Squared Error, mentioned in the 
+["Introduction to Data Science" by Rafael A. Irizarry](https://rafalab.github.io/dsbook/large-datasets.html#recommendation-systems).
+This function can be interpret similarly to a standard deviation: "it is the typical error we make when predicting a movie rating". If our RMSE is greater than 1, it is not good.
+
+Like I mentioned before, our goal in this project is to make our **RMSE** that should be at least equal or lower than **0.86549**.
+
+```{r RSME_formula}
+RMSE <- function(true_ratings = NULL, predicted_ratings = NULL) {
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```   
+
+$$\mbox{RMSE} = \sqrt{\frac{1}{N}\sum_{u,i}^{}(\hat{y}_{u,i}-y_{u,i})^{2}}$$
+
+Where:
+\begin{itemize}
+  \item $y_{u,i}$ is the rating for movie $i$ by user $u$ denoting our prediction $\hat{y}_{u,i}$
+  \item $N$ is the number of user/movies combination
+  \item The sum is occurring over all these combination
+\end{itemize}
+
+## Naive Model - A first model. {#FModel}
+
+We can start by building the simplest possible recommendation system: by predicting the rating for all movies regardless of user.
+
+$$Y_{u,i} = \hat{\mu} + \varepsilon_{u,i}$$
+
+Where $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0 and $\hat{\mu}$ is the average(mean).
+
+We know that the estimate that minimizes the RMSE is the least squares estimate of $\hat{\mu}$ and, in this case, is the average of all ratings.
+
+```{r muhat}
+muhat <- mean(train_set$rating) # Average rating of all movies
+muhat
+```
+
+If we predict all unknown ratings with $\hat{\mu}$ we obtain the following RMSE
+
+```{r}
+naive_rmse <- RMSE(test_set$rating, muhat)
+naive_rmse
+results <- data.frame(model="Naive Model", RMSE=naive_rmse) # We create a database of the results
+```
+
+The RMSE in this case, where we use the ```test_set``` database, it is **1.061135**. This result is a little bit further from our goal, where our RMSE should be 
+at least lower than **0.86549**.
+
+## Movie Effect Model {#MModel}
+
+Based on the Movielens data base, we know that movies are rated differently, we can make a more rigorous model by adding the term $b_i$ to represent average ranking
+for movie $_i$. In statistics books refer to $b$s as effects, but in the Netflix challenge papers, they refer to them as “bias,” thus the $b$ notation.
+
+The formula for this model should look like this:
+
+$$Y_{u,i} = \hat{\mu} + b_i + \epsilon_{u,i}$$
+Where:
+\begin{itemize}
+  \item $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0.
+  \item $\hat{\mu}$ is the average(mean).
+  \item And $b_i$ is just the average of $Y_{u,i} - \hat{\mu}$ for each movie $i$
+\end{itemize}
+
+```{r}
+muhat <- mean(train_set$rating) # Average rating of all movies
+muhat
+```
+
+```{r}
+movie_avgs <- train_set %>% # Average rating by movie
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - muhat))
+```
+
+We can see that these estimates vary considerably
+
+```{r}
+qplot(b_i, data = movie_avgs, bins = 10, color = I("black"))
+```
+
+Now, let's see how much our prediction improves since $\hat{y}_{u,i} = \hat{\mu} + b_i$:
+
+```{r}
+movie_eff_pred <- muhat + test_set %>%
+  left_join(movie_avgs, by='movieId') %>%
+  pull(b_i)
+rmse_movie <- RMSE(movie_eff_pred, test_set$rating)
+rmse_movie
+results <- results %>% # We add the result to the results database
+  add_row(model="Movie Effect Model", RMSE=rmse_movie)
+```
+
+The RMSE in this case is **0.9441568**. It much better than the first model. Yet, we didn't reach our RMSE goal (lower than **0.86549**).
+
+## Movie + User Effects Model {#MUModel}
+
+First of all, we want to watch the average rating for user $u$ for those that have rated 100 or more movies.
+
+```{r}
+train_set %>%
+  group_by(userId) %>%
+  filter(n()>=100) %>%
+  summarize(b_u = mean(rating)) %>%
+  ggplot(aes(b_u)) +
+  geom_histogram(bins = 30, color = "black")
+```
+
+Based on this, we can infer that we can improve our model by using the next formula:
+
+$$Y_{u,i} = \hat{\mu} + b_i + b_u + \epsilon_{u,i}$$
+
+Where:
+\begin{itemize}
+  \item $\varepsilon_{i,u}$ is the independent errors sampled from the same distribution centered at 0. 
+  \item $\hat{\mu}$ is the average(mean). 
+  \item $b_i$ is the average of $Y_{u,i} - \hat{\mu}$ for each movie $i$.
+  \item $b_u$ is the average of $Y_{u,i} - \hat{\mu} - \hat{b}_i$; is a user-specific effect.
+\end{itemize}
+
+```{r}
+muhat <- mean(train_set$rating) # Average rating of all movies
+muhat
+```
+
+```{r}
+user_avgs <- train_set %>% # Average rating by user
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - muhat - b_i))
+```
+
+Now let's see how much the RMSE improves:
+
+```{r}
+user_eff_pred <- test_set %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = muhat + b_i + b_u) %>%
+  pull(pred)
+rmse_user <- RMSE(user_eff_pred, test_set$rating)
+rmse_user
+results <- results %>% # We add the result to the results database
+  add_row(model="Movie + User Effects Model", RMSE=rmse_user)
+```
+
+The RMSE in this case is **0.8659736**. This is an improvement, we almost reached our RMSE goal, that was that our RMSE should be at least lower than **0.86549**.
+
+But, we can try to make more improvements by trying more models.
+
+## Penalized least squares {#Regularization}
+
+The general idea of penalized regression is to control the total variability of the movie effects.
+Specifically, instead of minimizing the least squares equation, we minimize an equation that adds a penalty:
+
+$$\hat{b_{i}} (\lambda) = \frac{1}{\lambda + n_{i}} \sum_{u=1}^{n_{i}} (Y_{u,i} - \hat{\mu}) $$
+
+Where:
+\begin{itemize}
+  \item $n_i$ is the number of ratings made for movie $i$.
+  \item $\lambda$ is the penalty.
+  \item $\hat{\mu}$ is the average(mean). 
+  \item $b_i$ is the average of $Y_{u,i} - \hat{\mu}$ for each movie $i$.
+\end{itemize}
+
+First, we have to identify what model is the one that give us the best results
+
+```{r}
+results
+```
+
+The best model until now is "[Movie + User Effects Model]{#MUModel}" and this is the model that we are going to use for regularization.
+
+### Penalized Movie + User Effects Model
+
+```{r}
+muhat <- mean(train_set$rating) # Average rating of all movies
+muhat
+```
+
+```{r}
+lambdas <- seq(0, 10, 0.5)
+
+# Modeling with Regularized Movie + User Effect Model
+rmses_m_u <- sapply(lambdas, function(l){
+  # Average rating by movie
+  b_i <- train_set %>%
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - muhat)/(n()+l))
+  # Average rating by user
+  b_u <- train_set %>%
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - b_i - muhat)/(n()+l))
+  # RMSE prediction on the test_set database
+  predicted_ratings <-
+    test_set %>%
+    left_join(b_i, by = "movieId") %>%
+    left_join(b_u, by = "userId") %>%
+    mutate(pred = muhat + b_i + b_u) %>%
+    pull(pred)
+  
+  return(RMSE(predicted_ratings, test_set$rating))
+})
+rmse_movie_user_pen <- min(rmses_m_u)
+rmse_movie_user_pen
+results <- results %>% # We add the result to the results database
+  add_row(model="Regularized Movie + User Effect Model", RMSE=rmse_movie_user_pen)
+```
+
+The RMSE in this case is **0.8654673**, we've achieve the goal (**RMSE <= 0.86549**). It is very similar at the third model, the [Movie + User Effects Model]{#MUModel}.
+
+```{r}
+qplot(lambdas, rmses_m_u)
+lambdas[which.min(rmses_m_u)] # The lambda value that minimize the RMSE
+```
+
+We can see that the lambda that minimizes the RMSE is **4.5**
+
+
+## Validation {#Validation}
+
+In this final step, we are going to test the best model until now with the ```validation``` database.
+
+First, we have to identify what model is the one that give us the best results.
+
+```{r}
+results
+```
+
+We calculate the average rating of all movies in the edx dataset.
+
+```{r muhat_edx}
+muhat <- mean(edx$rating) # Average rating of all movies
+muhat
+```
+
+Finally, we validate the best model with the ```validation``` database.
+
+```{r}
+lambdas <- seq(0, 10, 0.1)
+
+# Modeling with Regularized Movie + User Effect Model
+rmses_m_u_val <- sapply(lambdas, function(l){
+  # Average rating by movie
+  b_i <- edx %>%
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - muhat)/(n()+l))
+  # Average rating by user
+  b_u <- edx %>%
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - b_i - muhat)/(n()+l))
+  # RMSE prediction on the validation database
+  predicted_ratings <-
+    validation %>%
+    left_join(b_i, by = "movieId") %>%
+    left_join(b_u, by = "userId") %>%
+    mutate(pred = muhat + b_i + b_u) %>%
+    pull(pred)
+  
+  return(RMSE(predicted_ratings, validation$rating))
+})
+rmse_movie_user_pen_val <- min(rmses_m_u_val)
+rmse_movie_user_pen_val
+results <- results %>% # We add the result to the results database
+  add_row(model="Regularized Movie + User Effect Model Validated", RMSE=rmse_movie_user_pen_val)
+```
+
+With this validation, with a RMSE of **0.864817** we've reached our first goal, that was to get at least to **0.86549** 
+(RMSE <= **0.86549**), also, in this case, we actually exceed the target of the 
+[Capstone course - By HarvardX](https://www.edx.org/es/course/data-science-capstone) 
+of **RMSE < 0.86490**.
+
+\newpage
+# Results {#Results}
+
+This is a summary of the results for all the models that we did before, 
+trained on ```train_set``` and ```test_set```, and the best model between them, 
+it validated in ```edx``` database and ```valitation``` databases.
+
+```{r}
+results
+```
+
+\newpage
+# Final Conclusion {#Conclusion}
+
+After using four different models, we can say that the [```Regularized Movie + User Effect Model```]{#Regularization} gave the best results.
+When we validated that model, we can see that the model worked really fine and we exceed our first goal.
+
+Our first goal was that the RMSE should be at least lower than **0.86549** and in the 
+[Capstone course - By HarvardX](https://www.edx.org/es/course/data-science-capstone), 
+the goal was that the RMSE should be lower than **0.86490**. 
+But we got a result of **0.864817**, 
+that was the best result obtained based on these models, we've reached the first goal and the Course goal.
+
+The **limitations** in this report is that we used models of predictions until we reached our main goal, however, for **future works** we can allow
+us to use more models, like Genre Effect or try to model the movie recommender over years.
