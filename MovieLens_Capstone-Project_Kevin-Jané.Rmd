@@ -436,21 +436,7 @@ train_set$yearOfRate %>%
        xlab="Years")
 ```
 
-We can also try to plot the mean distribution of rating.
-We use the same criteria of before.
-
-```{r}
-tOfVote %>%
-  filter(t_vote %in% 
-           c('Negative Vote','Indifferent Vote', 'Positive Vote'))%>%
-  ggplot(aes(x=year,fill=t_vote, y = mean(rating))) + 
-  geom_bar(position="stack", stat="identity")+
-  xlab("Year") + ylab("Average") + 
-  ggtitle("Mean Rating Distribution by Type of Vote") +
-  scale_fill_brewer(palette="Set1")
-```
-
-These 2 graphs that we did, had the purpose of trying to let us know on what period of years, the people liked the most 
+This graph that we did, had the purpose of trying to let us know on what period of years, the people liked the most 
 those movies based on the criteria that we made on ratings.
 
 \newpage
